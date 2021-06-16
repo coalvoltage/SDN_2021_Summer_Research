@@ -53,7 +53,7 @@ public class LearningSwitchSolution {
         log.info("Started");
         appId = coreService.getAppId("<config name in xml>"); //equal to the name shown in pom.xml file
 
-        processor = new SwitchPacketProcessor();
+        processor = new CustomPacketProcessor();
         packetService.addProcessor(processor, PacketProcessor.director(3));
 
 

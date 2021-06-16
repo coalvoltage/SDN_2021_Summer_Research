@@ -18,6 +18,9 @@ import org.onosproject.net.flow.DefaultTrafficSelector;
 import org.onosproject.net.flow.DefaultTrafficTreatment;
 import org.onosproject.net.flow.FlowRule;
 import org.onosproject.net.flow.FlowRuleService;
+import org.onosproject.net.topology.TopologyEvent;
+import org.onosproject.net.topology.TopologyListener;
+import org.onosproject.net.topology.TopologyService;
 import org.onosproject.net.packet.PacketContext;
 import org.onosproject.net.packet.PacketPriority;
 import org.onosproject.net.packet.PacketProcessor;
@@ -38,7 +41,10 @@ public class LearningSwitchSolution {
 
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected FlowRuleService flowRuleService;
-
+    
+    @Reference(cardinality = ReferenceCardinality.MANDATORY)
+    protected TopologyService topologyService;
+    
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected CoreService coreService;
 
@@ -47,6 +53,7 @@ public class LearningSwitchSolution {
     protected Map<DeviceId, Map<MacAddress, PortNumber>> macTables = Maps.newConcurrentMap();
     private ApplicationId appId;
     private PacketProcessor processor;
+    private TopologyListener topologyListener;
 
     @Activate
     protected void activate() {
@@ -54,11 +61,16 @@ public class LearningSwitchSolution {
         appId = coreService.getAppId("<config name in xml>"); //equal to the name shown in pom.xml file
 
         processor = new CustomPacketProcessor();
+        topologyListener = new CustomTopologyListener();
+        
         packetService.addProcessor(processor, PacketProcessor.director(3));
-
+        
+        topologyService.addListener(topologyListener);
 
         packetService.requestPackets(DefaultTrafficSelector.builder()
                 .matchEthType(Ethernet.TYPE_IPV4).build(), PacketPriority.REACTIVE, appId, Optional.empty());
+        packetService.requestPackets(DefaultTrafficSelector.builder()
+                .matchEthType(Ethernet.TYPE_IPV6).build(), PacketPriority.REACTIVE, appId, Optional.empty());
         packetService.requestPackets(DefaultTrafficSelector.builder()
                 .matchEthType(Ethernet.TYPE_ARP).build(), PacketPriority.REACTIVE, appId, Optional.empty());
     }
@@ -68,11 +80,24 @@ public class LearningSwitchSolution {
     protected void deactivate() {
         log.info("Stopped");
         packetService.removeProcessor(processor);
+        topologyService.removeListener(topologyListener);
     }
 
 
     private class CustomPacketProcessor implements PacketProcessor {
         @Override
-        //Implement here
+        public void process(PacketContext pc) {
+            //find what IPs is associated with which edge switch
+            //get path associated with these edge
+            //install appropriate flow rules
+            //timeout 60 secs?
+        }
+    }
+    
+    private class CustomTopologyListener implements TopologyListener {
+        @Override
+        public void event(TopologyEvent) {
+            //On link removal notify either in cli or gui
+        }
     }
 }

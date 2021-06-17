@@ -142,8 +142,22 @@ public class LearningSwitchSolution {
                     destinationSwitch = currentPath[i];
                 }
             }
+            
+            
+            PortNumber outPort = destinationSwitch.src().port()
             //install appropriate flow rules
             //timeout 60 secs?
+            pc.treatmentBuilder().setOutput(outPort);
+            FlowRule fr = DefaultFlowRule.builder()
+                    .withSelector(DefaultTrafficSelector.builder().matchEthDst(pc.inPacket().parsed().getDestinationMAC()).build())
+                    .withTreatment(DefaultTrafficTreatment.builder().setOutput(outPort).build())
+                    .forDevice(cp.deviceId()).withPriority(PacketPriority.REACTIVE.priorityValue())
+                    .makeTemporary(60)
+                    .fromApp(appId).build();
+
+            flowRuleService.applyFlowRules(fr);
+            pc.send();
+            
         }
     }
     

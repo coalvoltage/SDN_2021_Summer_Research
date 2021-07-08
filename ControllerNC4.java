@@ -45,6 +45,9 @@ import org.onosproject.net.Host;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.commons.lang3.tuple.Pair;
+
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -69,15 +72,17 @@ public class ControllerNC4 {
     
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected CoreService coreService;
-
-
+	
+	private LocalTime timeErrorDetected;
 
     private final Logger log = LoggerFactory.getLogger(getClass());
 
     private ApplicationId appId;
     private PacketProcessor processor;
     private TopologyListener topologyListener;
-    //protected Map<IpElementId, DeviceId) ip2deviceTable = Maps.newConcurrentMap();
+	
+	//Src, Dst to Path
+	protected Map<IpAddress, Map<IpAddress, Path>> ipPair2pathTable = Maps.newConcurrentMap();
 
     @Activate
     protected void activate() {
@@ -89,7 +94,9 @@ public class ControllerNC4 {
         
         packetService.addProcessor(processor, PacketProcessor.director(3));
         topologyService.addListener(topologyListener);
-
+		
+		timeErrorDetected = LocalTime.now();
+		
         packetService.requestPackets(DefaultTrafficSelector.builder()
                 .matchEthType(Ethernet.TYPE_IPV4).build(), PacketPriority.REACTIVE, appId, Optional.empty());
         //packetService.requestPackets(DefaultTrafficSelector.builder()
@@ -104,9 +111,9 @@ public class ControllerNC4 {
         log.info("Stopped");
         packetService.removeProcessor(processor);
         topologyService.removeListener(topologyListener);
+		ipPair2pathTable.clear();
     }
-
-
+	
     private class CustomPacketProcessor implements PacketProcessor {
         @Override
         public void process(PacketContext pc) {
@@ -143,14 +150,14 @@ public class ControllerNC4 {
             Host tempSourceHost = null;
             Host tempDestHost = null;
             
-            log.info("Source: " + sourceIP.toString());
-            log.info("Destination: " + destinationIP.toString());
+            //log.info("Source: " + sourceIP.toString());
+            //log.info("Destination: " + destinationIP.toString());
             for(Host i : sourceHosts) {
-                log.info("Possible Source Hosts:" + i.id().toString());
+                //log.info("Possible Source Hosts:" + i.id().toString());
                 tempSourceHost = i;
             }
             for(Host i : destinationHosts) {
-                log.info("Possible Destination Hosts:" + i.id().toString());
+                //log.info("Possible Destination Hosts:" + i.id().toString());
                 tempDestHost = i;
             }
             
@@ -181,6 +188,32 @@ public class ControllerNC4 {
                             }
                         }
                         if( currentPath != null) {
+							//record path
+							/*
+							if(ipPair2pathTable.get(sourceIP) != null) {
+								Path prevPath = ipPair2pathTable.get(sourceIP).get(destinationIP);
+								if(!(prevPath.links().equals(currentPath.links())) && prevPath != null) {
+									log.info("Routing changed: Detected: " + timeErrorDetected.toString());
+									
+									long recordedTimeMSec = pc.time() % 1000;
+									long recordedTimeSec = (pc.time() / 1000) % 60;
+									long recordedTimeMin = (pc.time() / (60 * 1000)) % 60;
+									long recordedTimeHR = (pc.time() / (60 * 60 * 1000)) % 24;
+									
+									String timeCorrected = String.format("%02d.%02d.%02d.%03d", recordedTimeHR, recordedTimeMin, recordedTimeSec, recordedTimeMSec);
+									
+									log.info("Routing changed: End: " + timeCorrected);
+									
+									Map<IpAddress, Path> tempPairTable = ipPair2pathTable.get(sourceIP);
+									tempPairTable.put(destinationIP, currentPath);
+								}
+							}
+							else {
+								ipPair2pathTable.put(sourceIP, Maps.newConcurrentMap());
+								Map<IpAddress, Path> tempPairTable = ipPair2pathTable.get(sourceIP);
+								tempPairTable.put(destinationIP, currentPath);
+							}
+							*/
                             //Flow Rule
                             pc.treatmentBuilder().setOutput(currentPath.src().port());
                             FlowRule fr = DefaultFlowRule.builder()
@@ -239,6 +272,7 @@ public class ControllerNC4 {
                         
                         if(le.type() == LinkEvent.Type.LINK_REMOVED) {
                             log.warn("Link has been removed");
+							timeErrorDetected = LocalTime.now();
                         }
                     }
                 }

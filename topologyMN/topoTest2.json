@@ -1,0 +1,13 @@
+{
+	"devices": {
+		"of:0000000000000001": { "basic": { "name": "switch-1"}},
+		"of:0000000000000002": { "basic": { "name": "switch-2"}},
+		"of:0000000000000003": { "basic": { "name": "switch-3"}},
+		"of:0000000000000012": { "basic": { "name": "switch-12"}},
+		"of:0000000000000023": { "basic": { "name": "switch-23"}},
+		"of:0000000000000031": { "basic": { "name": "switch-31"}}
+	},
+
+	"hosts": {
+	}
+}

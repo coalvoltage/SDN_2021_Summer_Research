@@ -34,12 +34,12 @@ class SwitchInfo:
         self.TX = 0
         self.RX = 0
         self.echoRX = 0
-        self.time = time.process_time()
+        self.time = time.time() * 1000
         #setup/negotiate/demand/ASYNC
         self.mode = SwitchMode.SETUP
         self.status = SwitchStatus.INIT
         
-        self.last_sent_time = time.process_time()
+        self.last_sent_time = time.time() * 1000
         self.last_rcvd_time = 0
         self.missed = 0
         
@@ -101,12 +101,12 @@ def packPacketWithSwitchStat(switchStat):
     Rsvd = switchStat.Rsvd
     detectMult = switchStat.detectMult
     lengthPack = switchStat.lengthPack
-    myDiscrim = switchStat.myDiscrim
-    destDiscrim = switchStat.destDiscrim
+    myDiscrim = 0 #dont know what discrim to put
+    destDiscrim = switchStat.discrim
     TX = switchStat.TX
     RX = switchStat.RX
     echoRX = switchStat.echoRX
-    packPacket(vers, diag, hdpfcaBits, Rsvd, detectMult, lengthPack, myDiscrim,destDiscrim, TX, RX,echoRX)
+    return packPacket(vers, diag, hdpfcaBits, Rsvd, detectMult, lengthPack, myDiscrim, destDiscrim, TX, RX,echoRX)
     
 def depackPacket(packet):
     tempBits0 = int(packet[0])
@@ -129,34 +129,36 @@ def depackPacket(packet):
 
 def clientThread(ips, port, period, controller_queue):
     print('client')
-    gcdPeriod = period
+    minPeriod = period
     RXlist = []
     while (1):
         try:
             for ip in ips:
                 if(sessionsDict[ip].status != SwitchStatus.DOWN):
                     #Check Whether Traffic is active
-                    if(time.process_time() - sessionsDict[ip].last_sent_time >= sessionsDict[ip].RX \
+                    if((time.time() * 1000) - sessionsDict[ip].last_sent_time >= sessionsDict[ip].RX \
                     and sessionsDict[ip].activeTraffic == False):
                             packet = packPacketWithSwitchStat(sessionsDict[ip])
                             
                             print(packet)
                             assignBStr = bytes(packet)
                             s.sendto(assignBStr, (ip, port))
-                            sessionsDict[ip].last_sent_time = time.process_time()
-                    elif(time.process_time() - sessionsDict[ip].last_sent_time >= sessionsDict[ip].RX_Active \
+                            sessionsDict[ip].last_sent_time = time.time() * 1000
+                            print("up")
+                    elif((time.time() * 1000) - sessionsDict[ip].last_sent_time >= sessionsDict[ip].RX_Active \
                     and sessionsDict[ip].activeTraffic == True):
                             packet = packPacketWithSwitchStat(sessionsDict[ip])
                             print("Traffic being used")
                             print(packet)
                             assignBStr = bytes(packet)
                             s.sendto(assignBStr, (ip, port))
-                            sessionsDict[ip].last_sent_time = time.process_time()
+                            sessionsDict[ip].last_sent_time = time.time() * 1000
+                    print(str((time.time() * 1000) - sessionsDict[ip].last_sent_time))
 
         except:
             print("ERROR")
         
-        #Find gcdPeriod
+        #Find minPeriod
         RXlist.clear()
         for ip in ips:
             if(sessionsDict[ip].activeTraffic == False):
@@ -164,10 +166,10 @@ def clientThread(ips, port, period, controller_queue):
             else:
                 RXlist.append(sessionsDict[ip].RX_Active)
         
-        gcdPeriod = numpy.gcd(RXlist)
-        
+        minPeriod = numpy.gcd.reduce(RXlist)
+        print(str(minPeriod) + " ms")
         #Sleep
-        time.sleep(gcdPeriod)
+        time.sleep(minPeriod/1000)
     
 def serverThread(ips, port, period, controller_queue): 
     setupOn = True
@@ -191,7 +193,7 @@ def serverThread(ips, port, period, controller_queue):
             interpretedPacket =depackPacket(packet[0])
             print(interpretedPacket)
             
-            currentTime = time.process_time()
+            currentTime = time.time() * 1000
             if(packet[1][0] in sessionsDict):
                 sessionsDict[packet[1][0]].time = currentTime
                 
@@ -209,36 +211,40 @@ def serverThread(ips, port, period, controller_queue):
                     
                 else:
                     print("UNKNOWN STATUS: " + str(sessionsDict[packet[1][0]].status))
-                
-                if sessionsDict[packet[1][0]].mode == SwitchStatus.UP:
+                    
+                if sessionsDict[packet[1][0]].status == SwitchStatus.UP:
                     if sessionsDict[packet[1][0]].mode == SwitchMode.SETUP:
                         sessionsDict[packet[1][0]].hdpfcaBits = 40
                         sessionsDict[packet[1][0]].discrim = 0#discrim from packet here
                         sessionsDict[packet[1][0]].mode = SwitchMode.NEGOTIATE
-                        sessionsDict[packet[1][0]].RX = period
-                         sessionsDict[packet[1][0]].TX = period
+                        #sessionsDict[packet[1][0]].RX = period
+                        #sessionsDict[packet[1][0]].TX = period
+                        print("IN SETUP MODE")
                         
                         
-                    elif sessionsDict[packet[1][0]].mode == SwitchMode.NEGOTIATE and (interpretedPacket[2].hdpfcaBits & 0b0101000) == 0b0101000:
-                        if(interpretedPacket[8] > RX):
+                    elif sessionsDict[packet[1][0]].mode == SwitchMode.NEGOTIATE and (interpretedPacket[2] & 0b0101000) == 0b0101000:
+                        if(interpretedPacket[8] > sessionsDict[packet[1][0]].RX):
                             sessionsDict[packet[1][0]].RX = interpretedPacket[8]
                             sessionsDict[packet[1][0]].hdpfcaBits = 36
-                        if(interpretedPacket[9] > TX):
+                        if(interpretedPacket[9] > sessionsDict[packet[1][0]].TX):
                             sessionsDict[packet[1][0]].TX = interpretedPacket[9]
                             sessionsDict[packet[1][0]].hdpfcaBits = 36
+                        print("IN NEGOT MODE")
                             
-                    elif sessionsDict[packet[1][0]].mode == SwitchMode.NEGOTIATE and (interpretedPacket[2].hdpfcaBits & 0b0100100) == 0b0100100:
-                        if(interpretedPacket[8] > RX):
+                    elif sessionsDict[packet[1][0]].mode == SwitchMode.NEGOTIATE and (interpretedPacket[2] & 0b0100100) == 0b0100100:
+                        if(interpretedPacket[8] > sessionsDict[packet[1][0]].RX):
                             sessionsDict[packet[1][0]].RX = interpretedPacket[8]
                             sessionsDict[packet[1][0]].hdpfcaBits = 36
-                        if(interpretedPacket[9] > TX):
+                        if(interpretedPacket[9] > sessionsDict[packet[1][0]].TX):
                             sessionsDict[packet[1][0]].TX = interpretedPacket[9]
                             sessionsDict[packet[1][0]].hdpfcaBits = 36
                         sessionsDict[packet[1][0]].mode = SwitchMode.ASYNC
+                        print("IN NEGOT MODE")
                         
                     elif sessionsDict[packet[1][0]].mode == SwitchMode.ASYNC:
-                        if(interpretedPacket[2].hdpfcaBits != 0b0100000):
+                        if(interpretedPacket[2] != 0b0100000):
                             sessionsDict[packet[1][0]].hdpfcaBits = 32
+                        print("IN ASYNC MODE")
                 
                 print("Recieved from " + str(packet[1][0]))
                 
@@ -281,7 +287,7 @@ def main():
     CONTROLLERIP = []
     CURRENTIP = ''
     
-    POLLPERIOD = 10
+    POLLPERIOD = 10000
     MULTIPLIER = 3 # 3 - 50 allowed
     
     
@@ -307,14 +313,14 @@ def main():
     
     for ip in SERVERIP:
         sessionsDict[ip] = SwitchInfo()
-        sessionsDict[ip].RX = POLLPERIOD
+        sessionsDict[ip].RX = 1000
     
     #REST API testing
     
-    #currentTime = time.process_time()
+    #currentTime = time.time() * 1000
     #r = requests.get("http://" + CONTROLLERIP + ":8181/onos/v1/devices/", auth=HTTPBasicAuth('onos', 'rocks'))
     
-    #print(str(time.process_time() - currentTime))
+    #print(str(time.time() * 1000 - currentTime))
     
     #print(r.text)
     

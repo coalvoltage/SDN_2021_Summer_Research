@@ -20,6 +20,14 @@ def recSwitch(self, line):
     debugMessage = "Switch Update Finish at: " + datetime.datetime.now().strftime('%H:%M:%S,%f')[:-3] + " " + line
     print(debugMessage)
 
+def recVEth(self, line):
+    "recVeth <interface>"
+    debugMessage = "VEth Update Start at: " + datetime.datetime.now().strftime('%H:%M:%S,%f')[:-3] + " " + line
+    print(debugMessage)
+    CLI.do_sh(self, "ip link delete " + line)
+    debugMessage = "VEth Finish at: " + datetime.datetime.now().strftime('%H:%M:%S,%f')[:-3] + " " + line
+    print(debugMessage)
+
 class TopoTest(Topo):
     "test"
     def addSwitch(self, name, **opts):
@@ -48,6 +56,7 @@ topos = { 'topotest': (lambda: TopoTest()) }
 
 CLI.do_recLink = recLink
 CLI.do_recSwitch = recSwitch
+CLI.do_recVEth = recVEth
 
 if __name__ == '__main__':
     from onosnet import run

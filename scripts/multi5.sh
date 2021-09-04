@@ -2,7 +2,7 @@
 export PATH="$PATH:bin:onos/bin"
 
 ATOMIX_VER=atomix/atomix:3.1.5
-ONOS_VER=onosproject/onos
+ONOS_VER=onosproject/onos:2.5.2
 
 for i in {1..5}
 do

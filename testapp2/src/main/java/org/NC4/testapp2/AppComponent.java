@@ -1,4 +1,19 @@
-package org.NC4.fwdctrl;
+/*
+ * Copyright 2021-present Open Networking Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.NC4.testapp2;
 
 import com.google.common.collect.Maps;
 
@@ -65,16 +80,18 @@ import java.util.Dictionary;
 
 import static java.util.concurrent.Executors.newSingleThreadExecutor;
 import static org.onlab.util.Tools.groupedThreads;
-import static org.NC4.fwdctrl.OsgiPropertyConstants.TRIGGERTOPO;
-import static org.NC4.fwdctrl.OsgiPropertyConstants.TRIGGERTOPODEFAULT;
+import static org.NC4.testapp2.OsgiPropertyConstants.TRIGGERTOPO;
+import static org.NC4.testapp2.OsgiPropertyConstants.TRIGGERTOPODEFAULT;
 
-@Component(immediate = true, enabled = true,
-    service = {ControllerNC4.class},
-    property = {
-        TRIGGERTOPO + ":Boolean=" + TRIGGERTOPODEFAULT,
-    }
-)
-public class ControllerNC4 {
+import static org.onlab.util.Tools.get;
+
+//Creates configurable property
+@Component(immediate = true,
+        service = {SomeInterface.class},
+        property = {
+            TRIGGERTOPO + ":Boolean=" + TRIGGERTOPODEFAULT,
+        })
+public class AppComponent implements SomeInterface {
 
     // Instantiates the relevant services.
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
@@ -99,6 +116,7 @@ public class ControllerNC4 {
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected CoreService coreService;
 	
+    //Private Variables
     private boolean triggerTopo = TRIGGERTOPODEFAULT;
         
 	private LocalTime timeErrorDetected;
@@ -110,16 +128,7 @@ public class ControllerNC4 {
     private TopologyListener topologyListener;
     
 
-    
-
-        
-	//Src, Dst to Path
-	protected Map<IpAddress, Map<IpAddress, Path>> ipPair2pathTable = Maps.newConcurrentMap();
-    /*
-    @Property(name = "triggerTopoRefresh", booleanValue = false,
-            label = "Trigger a topology refresh")
-    private boolean triggerTopoRefresh = false;
-	*/
+    //Called whenever the config file is modified (The BFD script is primarly the one triggering this)
     @Modified
     public void modified(ComponentContext context) {
         
@@ -131,6 +140,7 @@ public class ControllerNC4 {
             tempBool = Boolean.parseBoolean(s.trim());
         }
         
+        //trigger topology refresh if cfg request is true
         //investigate later if onos can allow for reporting port change instead of topo refresh
         if(tempBool) {
             topoProvider.triggerRecompute();
@@ -139,16 +149,17 @@ public class ControllerNC4 {
     
 
 
- 
-
+    //Function is called when app is activated
     @Activate
     protected void activate(ComponentContext context) {
         log.info("Started");
 
         cfgService.registerProperties(getClass());
         
-        appId = coreService.getAppId("org.NC4.fwdctrl"); //equal to the name shown in pom.xml file
+        //change depending on name of app
+        appId = coreService.getAppId("org.NC4.testapp2"); //equal to the name shown in pom.xml file
         
+        //assign instances
         processor = new CustomPacketProcessor();
         topologyListener = new CustomTopologyListener();
         
@@ -161,37 +172,41 @@ public class ControllerNC4 {
 		
         packetService.requestPackets(DefaultTrafficSelector.builder()
                 .matchEthType(Ethernet.TYPE_IPV4).build(), PacketPriority.REACTIVE, appId, Optional.empty());
-        //packetService.requestPackets(DefaultTrafficSelector.builder()
-        //        .matchEthType(Ethernet.TYPE_IPV6).build(), PacketPriority.REACTIVE, appId, Optional.empty());
+
         packetService.requestPackets(DefaultTrafficSelector.builder()
                 .matchEthType(Ethernet.TYPE_ARP).build(), PacketPriority.REACTIVE, appId, Optional.empty());
                 
+        //Activate when you add ipv6 capabilities
+        //packetService.requestPackets(DefaultTrafficSelector.builder()
+        //        .matchEthType(Ethernet.TYPE_IPV6).build(), PacketPriority.REACTIVE, appId, Optional.empty());
+                
         modified(context);
-
-        //requestIntercepts();
     }
-
-
+    
+    //Function is called when app is deactivated
     @Deactivate
     protected void deactivate() {
         log.info("Stopped");
-        //withdrawIntercepts();
-        
+
         packetService.removeProcessor(processor);
         topologyService.removeListener(topologyListener);
-		ipPair2pathTable.clear();
         cfgService.unregisterProperties(getClass(), false);
     }
 	
+    //Extended to implement packet processsor
+    //Handles forwarding
     private class CustomPacketProcessor implements PacketProcessor {
         @Override
         public void process(PacketContext pc) {
             Short type = pc.inPacket().parsed().getEtherType();
             
+            //dont bother handling if already handled
 			if(pc.isHandled()){
 				return;
 			}
 			
+            //Check packet type
+            //add ipv6 at some point
             if(type != Ethernet.TYPE_IPV4 && type != Ethernet.TYPE_ARP) {
                 return;
             }
@@ -219,8 +234,6 @@ public class ControllerNC4 {
             Host tempSourceHost = null;
             Host tempDestHost = null;
             
-            //log.info("Source: " + sourceIP.toString());
-            //log.info("Destination: " + destinationIP.toString());
             for(Host i : sourceHosts) {
                 //log.info("Possible Source Hosts:" + i.id().toString());
                 tempSourceHost = i;
@@ -231,9 +244,10 @@ public class ControllerNC4 {
             }
             
             if (tempDestHost != null) {
+                //if you find the device the host is located
                 if(pc.inPacket().receivedFrom().deviceId().equals(tempDestHost.location().deviceId())){
                     if (!(pc.inPacket().receivedFrom().port().equals(tempDestHost.location().port()))) {
-                        //Flow Rule
+                        //Apply Flow Rule
                         pc.treatmentBuilder().setOutput(tempDestHost.location().port());
                         FlowRule fr = DefaultFlowRule.builder()
                                 .withSelector(DefaultTrafficSelector.builder().matchEthDst(pc.inPacket().parsed().getDestinationMAC()).build())
@@ -257,33 +271,7 @@ public class ControllerNC4 {
                             }
                         }
                         if( currentPath != null) {
-							//record path
-							/*
-							if(ipPair2pathTable.get(sourceIP) != null) {
-								Path prevPath = ipPair2pathTable.get(sourceIP).get(destinationIP);
-								if(!(prevPath.links().equals(currentPath.links())) && prevPath != null) {
-									log.info("Routing changed: Detected: " + timeErrorDetected.toString());
-									
-									long recordedTimeMSec = pc.time() % 1000;
-									long recordedTimeSec = (pc.time() / 1000) % 60;
-									long recordedTimeMin = (pc.time() / (60 * 1000)) % 60;
-									long recordedTimeHR = (pc.time() / (60 * 60 * 1000)) % 24;
-									
-									String timeCorrected = String.format("%02d.%02d.%02d.%03d", recordedTimeHR, recordedTimeMin, recordedTimeSec, recordedTimeMSec);
-									
-									log.info("Routing changed: End: " + timeCorrected);
-									
-									Map<IpAddress, Path> tempPairTable = ipPair2pathTable.get(sourceIP);
-									tempPairTable.put(destinationIP, currentPath);
-								}
-							}
-							else {
-								ipPair2pathTable.put(sourceIP, Maps.newConcurrentMap());
-								Map<IpAddress, Path> tempPairTable = ipPair2pathTable.get(sourceIP);
-								tempPairTable.put(destinationIP, currentPath);
-							}
-							*/
-                            //Flow Rule
+                            //Apply Flow Rule
                             pc.treatmentBuilder().setOutput(currentPath.src().port());
                             FlowRule fr = DefaultFlowRule.builder()
                                     .withSelector(DefaultTrafficSelector.builder().matchEthDst(pc.inPacket().parsed().getDestinationMAC()).build())
@@ -296,6 +284,7 @@ public class ControllerNC4 {
                             pc.send();
                         }
                         else {
+                            //when selected path is null, flood or block
 							if(topologyService.isBroadcastPoint(topologyService.currentTopology(), pc.inPacket().receivedFrom())) {
 								pc.treatmentBuilder().setOutput(PortNumber.FLOOD);
 								pc.send();
@@ -306,6 +295,7 @@ public class ControllerNC4 {
                         }
                     }
                     else {
+                        //when path isnt found, flood or block
 						if(topologyService.isBroadcastPoint(topologyService.currentTopology(), pc.inPacket().receivedFrom())) {
 							pc.treatmentBuilder().setOutput(PortNumber.FLOOD);
 							pc.send();
@@ -318,6 +308,7 @@ public class ControllerNC4 {
             
             }
             else {
+                //when dst isnt found, flood or block
 				if(topologyService.isBroadcastPoint(topologyService.currentTopology(), pc.inPacket().receivedFrom())) {
 					pc.treatmentBuilder().setOutput(PortNumber.FLOOD);
 					pc.send();
@@ -329,6 +320,7 @@ public class ControllerNC4 {
         }
     }
     
+    //Extended to trigger off of any topology event
     private class CustomTopologyListener implements TopologyListener {
         @Override
         public void event(TopologyEvent te) {
@@ -339,6 +331,7 @@ public class ControllerNC4 {
                     if(reasonsForTopo.get(i) instanceof LinkEvent) {
                         LinkEvent le = (LinkEvent) reasonsForTopo.get(i);
                         
+                        //Print if Linked is removed for recording time
                         if(le.type() == LinkEvent.Type.LINK_REMOVED) {
                             log.warn("Link has been removed");
 							timeErrorDetected = LocalTime.now();

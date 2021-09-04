@@ -14,18 +14,35 @@ from requests.auth import HTTPBasicAuth
 
 import json
 
+#enumerator definitions
 class SwitchMode(Enum):
     SETUP = 1
     NEGOTIATE = 2
     DEMAND = 3
     ASYNC = 4
+    TRAFFIC = 4
     
 class SwitchStatus(Enum):
     INIT = 1
     UP = 2
     DOWN = 3
 
+#Global dictionary for management between threads
 sessionsDict = {}
+
+#The Packet sent/recieved by 
+    #vers = 0b000
+    #diag = 0b00000
+    #hdpfcaBits = 0b000000
+    #Rsvd = 0b00
+    #detectMult = 0x00
+    #lengthPack = 0x00
+    #myDiscrim = 0x00000000
+    #destDiscrim = 0x00000000
+    #TX = 0x00000000
+    #RX = 0x00000000
+    #echoRX = 0x00000000
+    #activeTraffic = 0x0000
 
 class SwitchInfo:
     def __init__(self):
@@ -55,18 +72,10 @@ class SwitchInfo:
         self.recentTrafficOff = False
         self.RX_Active = 0
     
-    #vers = 0b000
-    #diag = 0b00000
-    #hdpfcaBits = 0b000000
-    #Rsvd = 0b00
-    #detectMult = 0x00
-    #lengthPack = 0x00
-    #myDiscrim = 0x00000000
-    #destDiscrim = 0x00000000
-    #TX = 0x00000000
-    #RX = 0x00000000
-    #echoRX = 0x00000000
-def packPacket(vers, diag, hdpfcaBits, Rsvd, detectMult, lengthPack, myDiscrim,destDiscrim, TX, RX,echoRX):
+
+    
+#Convert following data into byte stream
+def packPacket(vers, diag, hdpfcaBits, Rsvd, detectMult, lengthPack, myDiscrim,destDiscrim, TX, RX,echoRX, traffic):
     tempBits0 = (vers << 5) | diag
 
     tempBits1 = (hdpfcaBits << 2) | Rsvd
@@ -97,8 +106,13 @@ def packPacket(vers, diag, hdpfcaBits, Rsvd, detectMult, lengthPack, myDiscrim,d
     for i in range(4):
         packet.append(myTempBits2 & 0b011111111)
         myTempBits2 = echoRX >> 8
+    if traffic == True:
+        packet.append(0xFF)
+    else:
+        packet.append(0x00)
     return packet
-    
+
+#Uses a switch class with packPacket function 
 def packPacketWithSwitchStat(switchStat):
     vers = switchStat.vers #doesnt matter, this implementation doesnt follow bfd exactly
     diag = switchStat.diag #imp later?
@@ -111,8 +125,10 @@ def packPacketWithSwitchStat(switchStat):
     TX = switchStat.TX
     RX = switchStat.RX
     echoRX = switchStat.echoRX
-    return packPacket(vers, diag, hdpfcaBits, Rsvd, detectMult, lengthPack, myDiscrim, destDiscrim, TX, RX,echoRX)
+    traffic = switchStat.activeTraffic
+    return packPacket(vers, diag, hdpfcaBits, Rsvd, detectMult, lengthPack, myDiscrim, destDiscrim, TX, RX, echoRX, traffic)
     
+#Decypts packet into a tuple with their respective values
 def depackPacket(packet):
     tempBits0 = int(packet[0])
     vers = (tempBits0 & 0b011100000) >> 5
@@ -127,11 +143,15 @@ def depackPacket(packet):
     TX = int.from_bytes(packet[12:15], byteorder='little')
     RX = int.from_bytes(packet[16:19], byteorder='little')
     echoRX = int.from_bytes(packet[20:23], byteorder='little')
+    trafficTemp = int(packet[24])
+    traffic = False
     
-    return (vers, diag, hdpfcaBits, Rsvd, detectMult, lengthPack, myDiscrim,destDiscrim, TX, RX,echoRX)
-#try period of 0.1s for now
+    if(trafficTemp & 0xFF == 0xFF):
+        traffic = True
+    
+    return (vers, diag, hdpfcaBits, Rsvd, detectMult, lengthPack, myDiscrim,destDiscrim, TX, RX, echoRX, traffic)
 
-
+#Thread to handle sending packets to server thread
 def clientThread(ips, port, period, controller_queue):
     print('client')
     minPeriod = period
@@ -139,41 +159,36 @@ def clientThread(ips, port, period, controller_queue):
     while (1):
         try:
             for ip in ips:
-                #print("HERE")
+            #Check if switch is alive
                 if(sessionsDict[ip].status != SwitchStatus.DOWN):
                     #Check Whether Traffic is active
-                    #print("test")
                     if((time.time() * 1000) - sessionsDict[ip].last_sent_time >= sessionsDict[ip].RX \
                     and sessionsDict[ip].activeTraffic == False):
+                            #pack info stored about switch then send
                             packet = packPacketWithSwitchStat(sessionsDict[ip])
                             
-                            #print(packet)
                             assignBStr = bytes(packet)
                             s.sendto(assignBStr, (ip, port))
+                            
+                            #update time sent
                             sessionsDict[ip].last_sent_time = time.time() * 1000
-                            #print("up")
                     elif((time.time() * 1000) - sessionsDict[ip].last_sent_time >= sessionsDict[ip].RX_Active \
                     and sessionsDict[ip].activeTraffic == True):
-                            #packet = packPacketWithSwitchStat(sessionsDict[ip])
                             print("Traffic being used")
-                            #print(packet)
-                            assignBStr = bytes(packet)
-                            #s.sendto(assignBStr, (ip, port))
+                            #update time sent
                             sessionsDict[ip].last_sent_time = time.time() * 1000
-                    #print(str((time.time() * 1000) - sessionsDict[ip].last_sent_time))
                 else:
                     if((time.time() * 1000) - sessionsDict[ip].last_sent_time >= sessionsDict[ip].RX_Active \
                     and sessionsDict[ip].activeTraffic == False):
                             packet = packPacketWithSwitchStat(sessionsDict[ip])
                             print("Check if alive")
-                            #print(packet)
                             assignBStr = bytes(packet)
                             s.sendto(assignBStr, (ip, port))
                             sessionsDict[ip].last_sent_time = time.time() * 1000
 
         except:
             print("ERROR")
-            debugMessage = "Time Detected: " + datetime.datetime.now().strftime('%H:%M:%S,%f')[:-3]
+            debugMessage = "Time Detected: " + datetime.now().strftime('%H:%M:%S,%f')[:-3]
             print(debugMessage)
         
         #Find minPeriod
@@ -184,11 +199,11 @@ def clientThread(ips, port, period, controller_queue):
             else:
                 RXlist.append(sessionsDict[ip].RX_Active)
         
+        #Apply sleep based on minimum common period factor found among threads
         minPeriod = numpy.gcd.reduce(RXlist)
-        #print(str(minPeriod) + " ms")
-        #Sleep
         time.sleep(minPeriod/1000)
     
+#Thread to handle recieving packets from server thread
 def serverThread(ips, port, period, controller_queue): 
     setupOn = True
     setupPeriod = 1000
@@ -208,12 +223,8 @@ def serverThread(ips, port, period, controller_queue):
     while (1):
         try:
             packet = s.recvfrom(1024)
-            #print(packet[0])
-            #print(packet[1])
-            
-            #print("decrypted")
+
             interpretedPacket =depackPacket(packet[0])
-            #print(interpretedPacket)
             
             currentTime = time.time() * 1000
             if(packet[1][0] in sessionsDict):
@@ -244,8 +255,9 @@ def serverThread(ips, port, period, controller_queue):
                         #sessionsDict[packet[1][0]].TX = period
                         print("IN SETUP MODE")
                         
-                        
+                    #Negotiate max RX/TX periods, ignored to follow "REINFORCE" implementation
                     elif sessionsDict[packet[1][0]].mode == SwitchMode.NEGOTIATE and (interpretedPacket[2] & 0b0101000) == 0b0101000:
+                        #ignore RX/TX negotiagtion to follow "REINFORCE" implementation
                         if(interpretedPacket[8] > sessionsDict[packet[1][0]].RX):
                             #sessionsDict[packet[1][0]].RX = interpretedPacket[8]
                             sessionsDict[packet[1][0]].hdpfcaBits = 36
@@ -255,6 +267,7 @@ def serverThread(ips, port, period, controller_queue):
                         print("IN NEGOT MODE")
                             
                     elif sessionsDict[packet[1][0]].mode == SwitchMode.NEGOTIATE and (interpretedPacket[2] & 0b0100100) == 0b0100100:
+                        #ignore RX/TX negotiagtion to follow "REINFORCE" implementation
                         if(interpretedPacket[8] > sessionsDict[packet[1][0]].RX):
                             #sessionsDict[packet[1][0]].RX = interpretedPacket[8]
                             sessionsDict[packet[1][0]].hdpfcaBits = 36
@@ -268,42 +281,55 @@ def serverThread(ips, port, period, controller_queue):
                         if(interpretedPacket[2] != 0b0100000):
                             sessionsDict[packet[1][0]].hdpfcaBits = 32
                         print("IN ASYNC MODE")
-                
-                #print("Recieved from " + str(packet[1][0]))
-                
-            
 
+                        if(not sessionsDict[packet[1][0]].activeTraffic and interpretedPacket[11]):
+                            sessionsDict[packet[1][0]].mode == SwitchMode.TRAFFIC
+                            print("wooop")
+                        
+                        sessionsDict[packet[1][0]].activeTraffic = interpretedPacket[11]
+                    elif sessionsDict[packet[1][0]].mode == SwitchMode.TRAFFIC:
+
+                        print("Maintain ASYNC MODE")
+
+                        if(not interpretedPacket[11]):
+                            sessionsDict[packet[1][0]].mode == SwitchMode.ASYNC
+                        
                     
                 
         except timeout:
-            #switch is completely disconnected?
+            #error or no active switches
             existsTraffic = False
             recentTrafficOff = False
             maxTime = 0
             
+            #Check if any of the switches had traffic running through it
             for i in sessionsDict.keys():
                 if sessionsDict[i].activeTraffic:
                     existsTraffic = True
                     sessionsDict[i].time = time.time() * 1000
                     print("TRAFFIC")
                     
-                if(recentTrafficOff and (time.time() * 1000  - sessionsDict[i].time > maxTime) and sessionsDict[i].status == SwitchStatus.UP):
+                if(sessionsDict[i].recentTrafficOff and (time.time() * 1000  - sessionsDict[i].time > maxTime) and sessionsDict[i].status == SwitchStatus.UP):
                     maxTime = time.time() * 1000 - sessionsDict[i].time
                     print(time.time() * 1000 - sessionsDict[i].time)
                     
                 if sessionsDict[i].recentTrafficOff:
                     recentTrafficOff = True
             
+            #If exceed active traffic or exceed idle traffic timeout
             if((not existsTraffic and maxTime > 1000 and recentTrafficOff) or (not(recentTrafficOff) and not(existsTraffic))):
                 print("TIMEOUT OCCURED!!")
                 debugMessage = "Time Detected: " + datetime.now().strftime('%H:%M:%S,%f')[:-3]
                 print(debugMessage)
                 
                 for i  in sessionsDict.keys():
-                    controller_queue.append(i)
-                    sessionsDict[i].status = SwitchStatus.DOWN
-                    sessionsDict[i].recentTrafficOff = False
+                    if sessionsDict[i].status == SwitchStatus.UP:
+                        print("queued to controller")
+                        controller_queue.append(i)
+                        sessionsDict[i].status = SwitchStatus.DOWN
+                        sessionsDict[i].recentTrafficOff = False
             
+        #check timeout if other switches respond
         for i  in sessionsDict.keys():
             if(sessionsDict[i].time - currentTime > period):
                 if sessionsDict[i].activeTraffic:
@@ -313,17 +339,24 @@ def serverThread(ips, port, period, controller_queue):
                     print("Timeout met for " + str(i))
                     #send msg to controller
                     controller_queue.append(i)
-                    debugMessage = "Time Detected: " + datetime.datetime.now().strftime('%H:%M:%S,%f')[:-3]
+                    debugMessage = "Time Detected: " + datetime.now().strftime('%H:%M:%S,%f')[:-3]
                     print(debugMessage)
 
-def dummythread():
-    print("hello")
-
+#Monitor interfaces for traffic and indicate when to stop/send traffic
 def interfaceThread(interIn, ip, timeoutIn, periodRX, port):
     capture = []
     while(1):
+        #capture packets
         capture = sniff(iface=interIn, timeout=timeoutIn)
+        #determine activity based on size of capture (this is done because the controller already periodically probes the traffic)
         if len(capture) > (3):
+            if(not sessionsDict[ip].activeTraffic):
+                print("Send warning")
+                sessionsDict[ip].activeTraffic = True
+                packet = packPacketWithSwitchStat(sessionsDict[ip])
+                assignBStr = bytes(packet)
+                s.sendto(assignBStr, (ip, port))
+                sessionsDict[ip].mode = SwitchMode.TRAFFIC
             sessionsDict[ip].activeTraffic = True
             sessionsDict[ip].recentTrafficOff = False
             print("ACTIVE")
@@ -350,21 +383,10 @@ def interfaceThread(interIn, ip, timeoutIn, periodRX, port):
         print(len(capture))
         print(timeoutIn/periodRX)
 
-
-def controllerThread(ip, port, controller_queue):
-    version = 0x00
-    typePck = 0x00
-    lengthPck = 0x0000
-    xid = 0x00000000
-    reason = 0x02
-    padding = 0x00000000000000
-    while 1:
-        if(len(controller_queue) != 0):
-            s.sendto("<insert port status format>",(ip, port))
-
+#Open socket
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-
+#Main thread
 def main():
     SERVERIP = []
     SERVERDPID = []
@@ -381,6 +403,7 @@ def main():
     CON_PORT = 8181
     port_status_queue = []
     
+    #Parse arguments
     for i, arg in enumerate(sys.argv):
         if i == 1:
             SWITCHID = arg
@@ -395,24 +418,16 @@ def main():
         elif i >= 4 and (i % 3 == 2):
             SERVERDPID.append(arg)
             
-    print(str(CURRENTIP))
-    print(str(CONTROLLERIP))
-    print(str(SERVERIP[0]))
-    
+    #Configure socket
     s.bind((CURRENTIP, PORT))
     
     s.settimeout(POLLPERIOD)
     
 
     
-    #REST API testing
+    #Verify REST API is active
     
-    #currentTime = time.time() * 1000
     r = requests.get("http://" + CONTROLLERIP + ":8181/onos/v1/devices/", auth=HTTPBasicAuth('onos', 'rocks'))
-    
-    #print(str(time.time() * 1000 - currentTime))
-    
-    #print(r.text)
     
     try:
         x = r.json()
@@ -421,16 +436,8 @@ def main():
     except:
         print("json fail")
         
-
-        
-        
-        
-    r = requests.get("http://" + CONTROLLERIP + ":8181/onos/v1/links?device=of%3A" + SWITCHID, auth=HTTPBasicAuth('onos', 'rocks'))
     
-    x = r.json()
-    
-    print(r.text)
-    
+    #Assign default values to for each switch we are keeping track
     for j, ip in enumerate(SERVERIP):
         sessionsDict[ip] = SwitchInfo()
         sessionsDict[ip].RX = 2
@@ -445,30 +452,27 @@ def main():
             print(i["src"]["device"])
             print(i["dst"]["device"])
     
-    
-    start_new_thread(dummythread, ())
+    #Start new threads
     start_new_thread(serverThread, (SERVERIP, PORT, POLLPERIOD, port_status_queue))
     for i, j in zip(SERVERINTERFACE, SERVERIP):
         start_new_thread(interfaceThread, (i, j, 0.5, 2, PORT))
     start_new_thread(clientThread, (SERVERIP, PORT, POLLPERIOD, port_status_queue))
 
-    #start_new_thread(controllerThread, (CONTROLLERIP, CON_PORT, port_status_queue)
+    #Monitor "port_status_queue" to send changes to controller
     while 1:
         #send stuff to controller
         if(len(port_status_queue) > 0):
             print("sent to controller")
             ipToMod = port_status_queue.pop()
+            #Preform REST request based on port status
             if(sessionsDict[ipToMod].status == SwitchStatus.UP):
                 
                 r = requests.post("http://" + CONTROLLERIP + ":8181/onos/v1/devices/of:" + SWITCHID + "/portstate/"+ sessionsDict[ipToMod].port, json = {"enabled" : "true"}, auth=HTTPBasicAuth('onos', 'rocks'))
                 r.status_code
-                #r.raise_for_status()
             elif(sessionsDict[ipToMod].status == SwitchStatus.DOWN):
                 print("sent down")
                 
                 r = requests.post("http://" + CONTROLLERIP + ":8181/onos/v1/devices/of:" + SWITCHID + "/portstate/"+ sessionsDict[ipToMod].port, json = {"enabled" : "false"}, auth=HTTPBasicAuth('onos', 'rocks'))
-                r.status_code
-                #r.raise_for_status()
             
     
 if __name__ == "__main__":

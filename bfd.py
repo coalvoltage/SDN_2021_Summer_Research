@@ -436,6 +436,9 @@ def main():
     except:
         print("json fail")
         
+    r = requests.get("http://" + CONTROLLERIP + ":8181/onos/v1/links?device=of%3A" + SWITCHID, auth=HTTPBasicAuth('onos', 'rocks'))
+
+    x = r.json()
     
     #Assign default values to for each switch we are keeping track
     for j, ip in enumerate(SERVERIP):
@@ -466,13 +469,13 @@ def main():
             ipToMod = port_status_queue.pop()
             #Preform REST request based on port status
             if(sessionsDict[ipToMod].status == SwitchStatus.UP):
-                
-                r = requests.post("http://" + CONTROLLERIP + ":8181/onos/v1/devices/of:" + SWITCHID + "/portstate/"+ sessionsDict[ipToMod].port, json = {"enabled" : "true"}, auth=HTTPBasicAuth('onos', 'rocks'))
+                #r = requests.post("http://" + CONTROLLERIP + ":8181/onos/v1/devices/of:" + SWITCHID + "/portstate/"+ sessionsDict[ipToMod].port, json = {"enabled" : "true"}, auth=HTTPBasicAuth('onos', 'rocks'))
+                r = requests.post("http://" + CONTROLLERIP + ":8181/onos/v1/devices/configuration/org.NC4.testapp2.AppComponent?preset=true", json = {"triggerTopo" : "true"}, auth=HTTPBasicAuth('onos', 'rocks'))
                 r.status_code
             elif(sessionsDict[ipToMod].status == SwitchStatus.DOWN):
                 print("sent down")
                 
-                r = requests.post("http://" + CONTROLLERIP + ":8181/onos/v1/devices/of:" + SWITCHID + "/portstate/"+ sessionsDict[ipToMod].port, json = {"enabled" : "false"}, auth=HTTPBasicAuth('onos', 'rocks'))
+                r = requests.post("http://" + CONTROLLERIP + ":8181/onos/v1/devices/configuration/org.NC4.testapp2.AppComponent?preset=true", json = {"triggerTopo" : "true"}, auth=HTTPBasicAuth('onos', 'rocks'))
             
     
 if __name__ == "__main__":
